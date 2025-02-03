@@ -1,0 +1,89 @@
+---
+title: "Assignment 1"
+format: pdf
+editor: visual
+---
+
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(zoo)
+
+# Define URLs for the datasets
+urls <- list(
+  "Lower-Troposphere" = "http://vortex.nsstc.uah.edu/data/msu/v6.0/tlt/uahncdc_lt_6.0.txt",
+  "Mid-Troposphere" = "http://vortex.nsstc.uah.edu/data/msu/v6.0/tmt/uahncdc_mt_6.0.txt",
+  "Tropopause" = "http://vortex.nsstc.uah.edu/data/msu/v6.0/ttp/uahncdc_tp_6.0.txt",
+  "Lower-Stratosphere" = "http://vortex.nsstc.uah.edu/data/msu/v6.0/tls/uahncdc_ls_6.0.txt"
+)
+
+# Function to read and process data
+read_temperature_data <- function(name, url) {
+  # Read raw text from URL
+  raw_data <- read_lines(url)
+
+  # Identify first data row (skip metadata)
+  data_start <- which(grepl("^\\s*\\d", raw_data))[1]
+
+  # Read column headers from the line before the data start
+  column_names <- str_split(raw_data[data_start - 1], "\\s+")[[1]]
+  column_names <- column_names[column_names != ""]  # Remove empty column names
+  
+  # Ensure unique column names
+  column_names <- make.unique(column_names)
+
+  # Read the dataset using whitespace separation
+  df <- read_table(url, col_names = column_names, skip = data_start - 1, na = "NA")
+
+
+  # Rename and process data
+  df <- df %>%
+    rename(Month = Mo, Global = Globe) %>%
+    mutate(
+      Year = as.numeric(Year),
+      Month = as.numeric(Month),
+      Global = as.numeric(Global)
+    ) %>%
+    filter(Year >= 1980) %>%  # Keep only data from 1980 onward
+    arrange(Year, Month) %>%  # Ensure chronological order
+    filter(!is.na(Global)) %>% # Remove rows where Global is NA
+    mutate(
+      Moving_Avg = rollmean(Global, k = 12, fill = NA, align = "right"),
+      Atmosphere = name  # Add identifier
+    )
+
+  return(df)
+}
+
+#Processing all the datasets
+temp_data <- lapply(names(urls), function(name) {
+  read_temperature_data(name, urls[[name]])
+})
+
+#Extracting successful results and combining them
+df_combined <- bind_rows(temp_data)
+
+#Computing overall average
+df_avg <- df_combined %>%
+  group_by(Year, Month) %>%
+  summarise(Average = mean(Moving_Avg, na.rm = TRUE), .groups = "drop")
+
+#Merging and formating dates
+df_final <- df_combined %>%
+  left_join(df_avg, by = c("Year", "Month")) %>%
+  mutate(Date = as.Date(paste(Year, Month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+#Plot
+ggplot(df_final, aes(x = Date)) +
+  geom_line(aes(y = Moving_Avg, color = Atmosphere), size = 1) +
+  geom_line(aes(y = Average), color = "black", linetype = "dashed", size = 1.2) +
+  labs(title = "Global Temperature Trends Across Atmospheric Layers",
+       x = "Year",
+       y = "12-Month Moving Average Temperature",
+       color = "Atmospheric Level") +
+  theme_minimal()
+
+
+
+```
